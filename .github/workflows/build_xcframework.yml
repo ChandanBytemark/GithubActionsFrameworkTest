@@ -1,0 +1,100 @@
+name: Build XCFramework
+
+on:
+  push:
+    tags:        # Trigger the workflow when a new tag is pushed (e.g., v1.0.0)
+      - 'v*'    # Matches tags like v1.0, v2.3.4
+
+jobs:
+  build:
+    name: Build and Create XCFramework
+    runs-on: macos-latest # Use the latest macOS runner
+
+    env:
+      FRAMEWORK_NAME: GithubActionsFrameworkTest # Replace with your framework's name
+      PROJECT_PATH: GithubActionsFrameworkTest.xcodeproj # Or YourWorkspace.xcworkspace
+      SCHEME_NAME: Debug # The scheme that builds your framework
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_$(xcodebuild -version | grep Xcode | cut -d' ' -f2).app # Uses the default Xcode on the runner
+        # Or specify a version:
+        # run: sudo xcode-select -s /Applications/Xcode_16.3.app # Example for Xcode 16.3
+
+      # Optional: If you use CocoaPods
+      - name: Install CocoaPods
+        if: steps.file_exists.outputs.pods == 'true' # Only run if Podfile exists
+        run: gem install cocoapods
+
+      - name: Check for Podfile
+        id: file_exists
+        uses: andstor/file-existence-action@v2
+        with:
+          files: "Podfile"
+
+      - name: Install dependencies (CocoaPods)
+        if: steps.file_exists.outputs.pods == 'true'
+        run: pod install --repo-update
+
+      # Archive for iOS Devices
+      - name: Archive for iOS
+        run: |
+          xcodebuild archive \
+            -project "$GithubActionsFrameworkTest" \
+            -scheme "$Debug” \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "archives/$GithubActionsFrameworkTest-iOS" \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            SKIP_INSTALL=NO
+
+      # Archive for iOS Simulator
+      - name: Archive for iOS Simulator
+        run: |
+          xcodebuild archive \
+            -project "$GithubActionsFrameworkTest" \
+            -scheme "$Debug" \
+            -configuration Release \
+            -destination "generic/platform=iOS Simulator" \
+            -archivePath "archives/$GithubActionsFrameworkTest-iOS-Simulator" \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            SKIP_INSTALL=NO
+
+      # Create XCFramework
+      - name: Create XCFramework
+        run: |
+          xcodebuild -create-xcframework \
+            -framework "archives/$GithubActionsFrameworkTest-iOS.xcarchive/Products/Library/Frameworks/$GithubActionsFrameworkTest.framework" \
+            -framework "archives/$GithubActionsFrameworkTest-iOS-Simulator.xcarchive/Products/Library/Frameworks/$GithubActionsFrameworkTest.framework" \
+            -output "$GithubActionsFrameworkTest.xcframework"
+
+      # Optional: Zip the XCFramework
+      - name: Zip XCFramework
+        run: zip -r "$GithubActionsFrameworkTest.xcframework.zip" "$GithubActionsFrameworkTest.xcframework"
+
+      # Upload XCFramework as an artifact
+      - name: Upload XCFramework Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: $GithubActionsFrameworkTest.xcframework
+          path: $GithubActionsFrameworkTest.xcframework
+
+      # Optional: Upload Zipped XCFramework as an artifact (useful for releases)
+      - name: Upload Zipped XCFramework Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: $GithubActionsFrameworkTest.xcframework.zip
+          path: $GithubActionsFrameworkTest.xcframework.zip
+
+      # Optional: Create a GitHub Release and upload the zipped XCFramework
+      - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: build/GithubActionsFrameworkTest.xcframework.zip
+        generate_release_notes: true
+
+
